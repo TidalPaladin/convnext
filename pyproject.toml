@@ -3,13 +3,17 @@ requires = ["pdm-pep517>=1.0"]
 build-backend = "pdm.pep517.api"
 
 [project]
-name = "python-template"
+name = "convnext"
 description = ""
-requires-python = ">=3.11"
+requires-python = ">=3.10"
 authors = [
-    {name = "Scott Chase Waggener", email = "tidalpaladin@protonmail.com"},
+    {name = "Scott Chase Waggener", email = "chase.waggener@icloud.com"},
 ]
-dependencies = []
+dependencies = [
+  "torch",
+  "numpy",
+  "einops",
+]
 readme = "README.md"
 license = {text = "Apache"}
 dynamic = ["version"]
@@ -74,6 +78,11 @@ markers = [
   "ci_skip",
 ]
 filterwarnings = []
+
+[tool.pytest_env]
+TRITON_DEBUG = "1"
+TORCH_LOGS = "recompiles,dynamic"
+TORCH_COMPILE = "0"
 
 # Sample script config
 #[project.scripts]
