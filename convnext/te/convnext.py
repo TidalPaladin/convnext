@@ -1,53 +1,12 @@
-from dataclasses import dataclass, field
-from typing import ClassVar, List, Literal, Sequence, Tuple, Type, cast
+from typing import ClassVar, List, Tuple, Type, cast
 
 import torch.nn as nn
+import transformer_engine.pytorch as te
 from einops.layers.torch import Rearrange
 from torch import Tensor
 
+from ..convnext import ConvNextConfig
 from .block import ConvNextBlock2d, LayerNorm2d, grid_to_tokens, tokens_to_grid
-from .helpers import TRUNC_NORMAL_STD
-
-
-@dataclass(frozen=True)
-class ConvNextConfig:
-    # Inputs
-    in_channels: int
-    patch_size: Sequence[int]
-
-    # ConvNext Blocks
-    kernel_size: Sequence[int]
-    depths: Sequence[int]
-    hidden_sizes: Sequence[int]
-    ffn_hidden_sizes: Sequence[int]
-    normalization: str = "LayerNorm"
-    bias: bool = True
-    activation: str = "srelu"
-    hidden_dropout: float = 0.0
-    drop_path_rate: float = 0.0
-    checkpoint: bool = False
-
-    # Optional U-Net style upsampling
-    up_depths: Sequence[int] = field(default_factory=lambda: [])
-
-    # Backend selection
-    backend: Literal["pytorch", "te"] = "pytorch"
-
-    def instantiate(self) -> "ConvNext2d":
-        if self.backend == "pytorch":
-            return ConvNext2d(self)
-        elif self.backend == "te":
-            from .te.convnext import ConvNext2d as ConvNext2dTE
-
-            return cast(ConvNext2d, ConvNext2dTE(self))
-        else:
-            raise ValueError(f"Invalid backend: {self.backend}")
-
-    @property
-    def isotropic_output_dim(self) -> int:
-        if self.up_depths:
-            return list(reversed(self.hidden_sizes))[len(self.up_depths) - 1]
-        return self.hidden_sizes[-1]
 
 
 class ConvNext2d(nn.Module):
@@ -64,7 +23,7 @@ class ConvNext2d(nn.Module):
             kernel_size=cast(Tuple[int, int], tuple(self.config.patch_size)),
             stride=cast(Tuple[int, int], tuple(self.config.patch_size)),
         )
-        self.norm = nn.LayerNorm(self.config.hidden_sizes[0])
+        self.norm = te.LayerNorm(self.config.hidden_sizes[0])
 
         # Down stages
         self.down_stages = nn.ModuleList(
@@ -155,9 +114,8 @@ class ConvNext2d(nn.Module):
 
         # Normalization + Linear
         if pool_type is not None:
-            layer.add_module("norm", nn.LayerNorm(self.config.isotropic_output_dim))
-            linear = nn.Linear(self.config.isotropic_output_dim, out_dim)
-            nn.init.trunc_normal_(linear.weight, std=TRUNC_NORMAL_STD)
+            layer.add_module("norm", te.LayerNorm(self.config.isotropic_output_dim))
+            linear = te.Linear(self.config.isotropic_output_dim, out_dim)
             layer.add_module("linear", linear)
         else:
             layer.add_module("norm", LayerNorm2d(self.config.isotropic_output_dim))
