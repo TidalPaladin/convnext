@@ -2,7 +2,7 @@ from typing import Sequence, Tuple, cast
 
 import torch.nn as nn
 import torch.nn.functional as F
-import transformer_engine.pytorch as te
+import transformer_engine.pytorch as te  # type: ignore[reportMissingImports]
 from torch import Tensor
 
 from ..block import grid_to_tokens, tokens_to_grid

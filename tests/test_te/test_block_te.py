@@ -3,7 +3,12 @@ import torch
 from torch.testing import assert_close
 
 from convnext.block import ConvNextBlock2d as ConvNextBlock2dBaseline
-from convnext.te.block import ConvNextBlock2d
+
+
+try:
+    from convnext.te.block import ConvNextBlock2d
+except ImportError:
+    pytest.skip("Transformer Engine is not installed", allow_module_level=True)
 
 
 class TestConvNextBlock2dTransformerEngine:
