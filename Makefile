@@ -1,7 +1,7 @@
 .PHONY: clean clean-env check quality style tag-version test env upload upload-test
 
 PROJECT=convnext
-QUALITY_DIRS=$(PROJECT) tests
+QUALITY_DIRS=$(PROJECT) tests benchmark.py
 CLEAN_DIRS=$(PROJECT) tests
 PYTHON=pdm run python
 

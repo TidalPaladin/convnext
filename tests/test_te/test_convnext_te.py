@@ -5,7 +5,12 @@ import torch
 from torch.testing import assert_close
 
 from convnext.convnext import ConvNextConfig
-from convnext.te.convnext import ConvNext2d
+
+
+try:
+    from convnext.te.convnext import ConvNext2d
+except ImportError:
+    pytest.skip("Transformer Engine is not installed", allow_module_level=True)
 
 
 @pytest.fixture
@@ -26,8 +31,6 @@ def config():
     return config
 
 
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA is not available")
-@pytest.mark.skipif(not pytest.importorskip("transformer_engine.pytorch"), reason="Transformer Engine is not installed")
 class TestConvNext:
 
     @pytest.mark.parametrize(

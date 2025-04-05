@@ -1,7 +1,7 @@
 from typing import ClassVar, List, Tuple, Type, cast
 
 import torch.nn as nn
-import transformer_engine.pytorch as te
+import transformer_engine.pytorch as te  # type: ignore[reportMissingImports]
 from einops.layers.torch import Rearrange
 from torch import Tensor
 

@@ -3,11 +3,14 @@ import torch
 from torch.testing import assert_close
 
 from convnext.block import ConvNextBlock2d as ConvNextBlock2dBaseline
-from convnext.te.block import ConvNextBlock2d
 
 
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA is not available")
-@pytest.mark.skipif(not pytest.importorskip("transformer_engine.pytorch"), reason="Transformer Engine is not installed")
+try:
+    from convnext.te.block import ConvNextBlock2d
+except ImportError:
+    pytest.skip("Transformer Engine is not installed", allow_module_level=True)
+
+
 class TestConvNextBlock2dTransformerEngine:
 
     @pytest.mark.parametrize("dtype", [torch.float32, torch.bfloat16])
