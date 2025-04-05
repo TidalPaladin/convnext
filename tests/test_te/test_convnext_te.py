@@ -26,8 +26,6 @@ def config():
     return config
 
 
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA is not available")
-@pytest.mark.skipif(not pytest.importorskip("transformer_engine.pytorch"), reason="Transformer Engine is not installed")
 class TestConvNext:
 
     @pytest.mark.parametrize(
