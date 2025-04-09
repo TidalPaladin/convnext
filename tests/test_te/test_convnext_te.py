@@ -44,6 +44,7 @@ class TestConvNext:
                     ffn_hidden_sizes=(128, 192, 256),
                     patch_size=(4, 4),
                     kernel_size=(3, 3),
+                    normalization="RMSNorm",
                 ),
                 (1, 64, 16, 16),
             ),
@@ -56,6 +57,7 @@ class TestConvNext:
                     up_depths=(2, 2, 2),
                     patch_size=(4, 4),
                     kernel_size=(3, 3),
+                    normalization="RMSNorm",
                 ),
                 (1, 32, 64, 64),
             ),
@@ -140,7 +142,9 @@ class TestConvNext:
         exp = (1, 10) if pool_type is not None else (1, 10, 14, 14)
         assert out.shape == exp
 
-    def test_baseline(self, config):
+    @pytest.mark.parametrize("normalization", ["LayerNorm", "RMSNorm"])
+    def test_baseline(self, config, normalization):
+        config = replace(config, normalization=normalization)
         x = torch.randn(1, 3, 224, 224, device="cuda")
         model = ConvNext2d(config).to("cuda")
         baseline = ConvNext2d(replace(config, backend="pytorch")).to("cuda")

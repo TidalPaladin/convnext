@@ -5,7 +5,7 @@ import torch.nn as nn
 from einops.layers.torch import Rearrange
 from torch import Tensor
 
-from .block import ConvNextBlock2d, LayerNorm2d, grid_to_tokens, tokens_to_grid
+from .block import ConvNextBlock2d, LayerNorm2d, RMSNorm2d, grid_to_tokens, tokens_to_grid
 from .helpers import TRUNC_NORMAL_STD
 
 
@@ -64,7 +64,7 @@ class ConvNext2d(nn.Module):
             kernel_size=cast(Tuple[int, int], tuple(self.config.patch_size)),
             stride=cast(Tuple[int, int], tuple(self.config.patch_size)),
         )
-        self.norm = nn.LayerNorm(self.config.hidden_sizes[0])
+        self.norm = self.create_norm(self.config.hidden_sizes[0])
 
         # Down stages
         self.down_stages = nn.ModuleList(
@@ -127,6 +127,24 @@ class ConvNext2d(nn.Module):
             ]
         )
 
+    def create_norm(self, dim: int) -> nn.Module:
+        match self.config.normalization:
+            case "LayerNorm":
+                return nn.LayerNorm(dim)
+            case "RMSNorm":
+                return nn.RMSNorm(dim)
+            case _:
+                raise ValueError(f"Invalid normalization: {self.config.normalization}")
+
+    def create_norm_2d(self, dim: int) -> nn.Module:
+        match self.config.normalization:
+            case "LayerNorm":
+                return LayerNorm2d(dim)
+            case "RMSNorm":
+                return RMSNorm2d(dim)
+            case _:
+                raise ValueError(f"Invalid normalization: {self.config.normalization}")
+
     def create_head(
         self,
         out_dim: int,
@@ -155,12 +173,12 @@ class ConvNext2d(nn.Module):
 
         # Normalization + Linear
         if pool_type is not None:
-            layer.add_module("norm", nn.LayerNorm(self.config.isotropic_output_dim))
+            layer.add_module("norm", self.create_norm(self.config.isotropic_output_dim))
             linear = nn.Linear(self.config.isotropic_output_dim, out_dim)
             nn.init.trunc_normal_(linear.weight, std=TRUNC_NORMAL_STD)
             layer.add_module("linear", linear)
         else:
-            layer.add_module("norm", LayerNorm2d(self.config.isotropic_output_dim))
+            layer.add_module("norm", self.create_norm_2d(self.config.isotropic_output_dim))
             conv = nn.Conv2d(self.config.isotropic_output_dim, out_dim, kernel_size=1)
             layer.add_module("conv", conv)
 
