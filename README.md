@@ -27,7 +27,6 @@ from convnext import ConvNextConfig
 config = ConvNextConfig(
     in_channels=3,
     depths=(2, 2, 2),
-    #up_depths=(2, 2) # U-Net design
     hidden_sizes=[64, 96, 128],
     ffn_hidden_sizes=[256, 384, 512],
     patch_size=(4, 4),
@@ -39,8 +38,28 @@ config = ConvNextConfig(
     backend="pytorch", # or 'te' for Transformer Engine
 )
 model = config.instantiate()
+```
 
-B, C, H, W = 2, 3, 224, 224
+
+Alternatively, to create a U-Net style ConvNext model
+
+```python
+# Coarsest level = 256/16 = 16
+# Three upsampling stages
+config = ConvNextConfig(
+    in_channels=3,
+    depths=(2, 2, 2, 2),
+    up_depths=(2, 2, 2),
+    hidden_sizes=(32, 48, 64, 72),
+    ffn_hidden_sizes=(128, 192, 256, 288),
+    patch_size=(2, 2),
+    kernel_size=(7, 7),
+)
+
+B, C, H, W = 2, 3, 256, 256
 x = torch.rand(B, C, H W)
-y = model(x)
+model = ConvNext2d(config)
+with torch.autocast(device_type="cpu", dtype=torch.bfloat16, enabled=True):
+    out = model(x)
+assert out.shape == (2, 48, 64, 64)
 ```
