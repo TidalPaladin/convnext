@@ -20,6 +20,17 @@ class LayerNorm2d(nn.Module):
         return tokens_to_grid(y, x.shape[2:])
 
 
+class RMSNorm2d(nn.Module):
+    def __init__(self, num_features: int, eps: float = 1e-5):
+        super().__init__()
+        self.norm = te.RMSNorm(num_features, eps=eps)
+
+    def forward(self, x: Tensor) -> Tensor:
+        y = grid_to_tokens(x)
+        y = self.norm(y)
+        return tokens_to_grid(y, x.shape[2:])
+
+
 class ConvNextBlock2d(nn.Module):
 
     def __init__(
