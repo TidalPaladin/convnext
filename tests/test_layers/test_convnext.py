@@ -131,3 +131,27 @@ class TestConvNext:
             out = head(features)
         exp = (1, 10) if pool_type is not None else (1, 10, 14, 14)
         assert out.shape == exp
+
+    def test_unet_size(self):
+        torch.random.manual_seed(42)
+        # Coarsest level = 256/16 = 16
+        config1 = ConvNextConfig(
+            in_channels=1,
+            depths=(2, 2, 2, 2),
+            hidden_sizes=(32, 48, 64, 72),
+            ffn_hidden_sizes=(128, 192, 256, 288),
+            patch_size=(2, 2),
+            kernel_size=(3, 3),
+        )
+        # Two up levels = 64
+        config2 = replace(config1, up_depths=(2, 2, 2))
+
+        B, C, H, W = 1, 1, 256, 256
+        x = torch.randn(B, C, H, W)
+        model1 = ConvNext2d(config1)
+        model2 = ConvNext2d(config2)
+        with torch.autocast(device_type="cpu", dtype=torch.bfloat16, enabled=True):
+            out1 = model1(x)
+            out2 = model2(x)
+        assert out1.shape == (1, 72, 16, 16)
+        assert out2.shape == (1, 48, 64, 64)
