@@ -248,6 +248,7 @@ class ConvNextBlock2d(nn.Module):
                     eps,
                 )
             case "te":
+                check_te_installed(te)
                 self.mlp = te.LayerNormMLP(
                     hidden_size,
                     ffn_hidden_size,

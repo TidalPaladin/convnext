@@ -5,7 +5,7 @@ from torch.testing import assert_close
 from convnext.block import ConvNextBlock2d
 
 
-@pytest.fixture(params=["pytorch", "te"])
+@pytest.fixture(params=["pytorch", pytest.param("te", marks=pytest.mark.cuda)])
 def backend(request):
     return request.param
 
