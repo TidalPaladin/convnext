@@ -1,5 +1,5 @@
 import math
-from typing import Callable, Sequence, Tuple, cast
+from typing import TYPE_CHECKING, Callable, Literal, Sequence, Tuple, cast
 
 import torch
 import torch.nn as nn
@@ -9,7 +9,13 @@ from torch import Tensor
 from torch.utils.checkpoint import checkpoint
 
 from .drop_path import drop_path
-from .helpers import TRUNC_NORMAL_STD, compile_is_disabled, get_activation
+from .helpers import TRUNC_NORMAL_STD, check_te_installed, compile_is_disabled, get_activation, try_import_te
+
+
+if TYPE_CHECKING:
+    import transformer_engine.pytorch as te  # type: ignore[reportMissingImports]
+else:
+    te = try_import_te()
 
 
 @torch.compile(fullgraph=True, disable=compile_is_disabled())
@@ -66,12 +72,13 @@ def forward_layer_norm_mlp(
     fc2_weight: Tensor,
     fc2_bias: Tensor | None,
     activation: Callable[[Tensor], Tensor],
+    eps: float,
 ) -> Tensor:
     # Normalization
     if normalization == "LayerNorm":
-        y = F.layer_norm(x, x.shape[-1:], weight=norm_weight, bias=norm_bias)
+        y = F.layer_norm(x, x.shape[-1:], weight=norm_weight, bias=norm_bias, eps=eps)
     elif normalization == "RMSNorm":
-        y = F.rms_norm(x, x.shape[-1:], weight=norm_weight)
+        y = F.rms_norm(x, x.shape[-1:], weight=norm_weight, eps=eps)
     else:
         raise ValueError(f"Normalization {normalization} not supported")
 
@@ -96,9 +103,11 @@ class LayerNormMLP(nn.Module):
         normalization: str,
         bias: bool = True,
         checkpoint: bool = False,
+        eps: float = 1e-5,
     ):
         super().__init__()
         self.checkpoint = checkpoint
+        self.eps = eps
 
         # Normalization
         self.normalization = normalization
@@ -139,6 +148,7 @@ class LayerNormMLP(nn.Module):
                 self.fc2_weight,
                 self.fc2_bias,
                 self.act,
+                self.eps,
                 use_reentrant=False,
             )
         else:
@@ -152,6 +162,7 @@ class LayerNormMLP(nn.Module):
                 self.fc2_weight,
                 self.fc2_bias,
                 self.act,
+                self.eps,
             )
         assert isinstance(y, Tensor)
         assert y.shape == x.shape
@@ -159,9 +170,16 @@ class LayerNormMLP(nn.Module):
 
 
 class LayerNorm2d(nn.Module):
-    def __init__(self, num_features: int, eps: float = 1e-5):
+    def __init__(self, num_features: int, eps: float = 1e-5, backend: str = "pytorch"):
         super().__init__()
-        self.norm = nn.LayerNorm(num_features, eps=eps)
+        match backend:
+            case "pytorch":
+                self.norm = nn.LayerNorm(num_features, eps=eps)
+            case "te":
+                check_te_installed(te)
+                self.norm = te.LayerNorm(num_features, eps=eps)
+            case _:
+                raise ValueError(f"Backend {backend} not supported")
 
     def forward(self, x: Tensor) -> Tensor:
         y = grid_to_tokens(x)
@@ -170,59 +188,21 @@ class LayerNorm2d(nn.Module):
 
 
 class RMSNorm2d(nn.Module):
-    def __init__(self, num_features: int, eps: float = 1e-5):
+    def __init__(self, num_features: int, eps: float = 1e-5, backend: str = "pytorch"):
         super().__init__()
-        self.norm = nn.RMSNorm(num_features, eps=eps)
+        match backend:
+            case "pytorch":
+                self.norm = nn.RMSNorm(num_features, eps=eps)
+            case "te":
+                check_te_installed(te)
+                self.norm = te.RMSNorm(num_features, eps=eps)
+            case _:
+                raise ValueError(f"Backend {backend} not supported")
 
     def forward(self, x: Tensor) -> Tensor:
         y = grid_to_tokens(x)
         y = self.norm(y)
         return tokens_to_grid(y, x.shape[2:])
-
-
-@torch.compile(fullgraph=True, disable=compile_is_disabled())
-def convnext_forward_2d(
-    x: Tensor,
-    conv_weight: Tensor,
-    conv_bias: Tensor | None,
-    stride: Sequence[int],
-    padding: Sequence[int],
-    groups: int,
-    normalization: str,
-    norm_weight: Tensor,
-    norm_bias: Tensor | None,
-    fc1_weight: Tensor,
-    fc1_bias: Tensor | None,
-    fc2_weight: Tensor,
-    fc2_bias: Tensor | None,
-    activation: Callable[[Tensor], Tensor],
-    drop_path_rate: float,
-    training: bool,
-) -> Tensor:
-    if x.ndim != 4:
-        raise ValueError(f"Input must be a 4D tensor, got {x.shape}")
-
-    # DW conv, reshape channels last
-    y = F.conv2d(x, conv_weight, conv_bias, stride=stride, padding=padding, groups=groups)
-    y = grid_to_tokens(y)
-
-    # Normalization
-    if normalization == "LayerNorm":
-        y = F.layer_norm(y, y.shape[-1:], weight=norm_weight, bias=norm_bias)
-    elif normalization == "RMSNorm":
-        y = F.rms_norm(y, y.shape[-1:], weight=norm_weight)
-    else:
-        raise ValueError(f"Normalization {normalization} not supported")
-
-    # FF1
-    y = F.linear(y, fc1_weight, fc1_bias)
-    y = activation(y)
-
-    # FF2, convert back to 2D grid
-    y = F.linear(y, fc2_weight, fc2_bias)
-    y = tokens_to_grid(y, x.shape[2:])
-
-    return x + drop_path(y, drop_path_rate, training)
 
 
 class ConvNextBlock2d(nn.Module):
@@ -238,6 +218,8 @@ class ConvNextBlock2d(nn.Module):
         bias: bool = True,
         drop_path_rate: float = 0.0,
         checkpoint: bool = False,
+        eps: float = 1e-5,
+        backend: Literal["pytorch", "te"] = "pytorch",
     ):
         super().__init__()
         self.drop_path_rate = drop_path_rate
@@ -254,14 +236,29 @@ class ConvNextBlock2d(nn.Module):
             groups=hidden_size,
         )
 
-        self.mlp = LayerNormMLP(
-            hidden_size,
-            ffn_hidden_size,
-            activation,
-            normalization,
-            bias,
-            checkpoint,
-        )
+        match backend:
+            case "pytorch":
+                self.mlp = LayerNormMLP(
+                    hidden_size,
+                    ffn_hidden_size,
+                    activation,
+                    normalization,
+                    bias,
+                    checkpoint,
+                    eps,
+                )
+            case "te":
+                self.mlp = te.LayerNormMLP(
+                    hidden_size,
+                    ffn_hidden_size,
+                    activation=activation,
+                    normalization=normalization,
+                    bias=bias,
+                    eps=eps,
+                )
+            case _:
+                raise ValueError(f"Backend {backend} not supported")
+
         self.reset_parameters()
 
     def reset_parameters(self) -> None:

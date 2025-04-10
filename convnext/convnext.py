@@ -61,6 +61,7 @@ class ConvNextConfig:
             normalization=self.normalization,
             checkpoint=self.checkpoint,
             drop_path_rate=self.drop_path_rate,
+            backend=self.backend,
         )
 
 
@@ -125,54 +126,33 @@ class ConvNext2d(nn.Module):
         return self.config.device_type
 
     def create_block(self, hidden_size: int, ffn_hidden_size: int) -> nn.Module:
-        match self.config.backend:
-            case "pytorch":
-                return ConvNextBlock2d(hidden_size, ffn_hidden_size, **self.config.block_kwargs)
-            case "te":
-                check_te_installed(te)
-                from .te.block import ConvNextBlock2d as ConvNextBlock2dTE
-
-                return ConvNextBlock2dTE(hidden_size, ffn_hidden_size, **self.config.block_kwargs)
-            case _:
-                raise ValueError(f"Invalid backend: {self.config.backend}")
+        return ConvNextBlock2d(hidden_size, ffn_hidden_size, **self.config.block_kwargs)
 
     def create_norm(self, dim: int) -> nn.Module:
         match (self.config.normalization, self.config.backend):
             case ("LayerNorm", "pytorch"):
-                return nn.LayerNorm(dim)
+                return nn.LayerNorm(dim, eps=1e-5)
             case ("LayerNorm", "te"):
                 check_te_installed(te)
-                return te.LayerNorm(dim)
+                return te.LayerNorm(dim, eps=1e-5)
             case ("RMSNorm", "pytorch"):
-                return nn.RMSNorm(dim)
+                return nn.RMSNorm(dim, eps=1e-5)
             case ("RMSNorm", "te"):
                 check_te_installed(te)
-                return te.RMSNorm(dim)
+                return te.RMSNorm(dim, eps=1e-5)
             case _:
                 raise ValueError(
                     f"Invalid normalization: {self.config.normalization} for backend: {self.config.backend}"
                 )
 
     def create_norm_2d(self, dim: int) -> nn.Module:
-        match (self.config.normalization, self.config.backend):
-            case ("LayerNorm", "pytorch"):
-                return LayerNorm2d(dim)
-            case ("LayerNorm", "te"):
-                check_te_installed(te)
-                from .te.block import RMSNorm2d as RMSNorm2dTE
-
-                return RMSNorm2dTE(dim)
-            case ("RMSNorm", "pytorch"):
-                return RMSNorm2d(dim)
-            case ("RMSNorm", "te"):
-                check_te_installed(te)
-                from .te.block import RMSNorm2d as RMSNorm2dTE
-
-                return RMSNorm2dTE(dim)
+        match self.config.normalization:
+            case "LayerNorm":
+                return LayerNorm2d(dim, backend=self.config.backend, eps=1e-5)
+            case "RMSNorm":
+                return RMSNorm2d(dim, backend=self.config.backend, eps=1e-5)
             case _:
-                raise ValueError(
-                    f"Invalid normalization: {self.config.normalization} for backend: {self.config.backend}"
-                )
+                raise ValueError(f"Invalid normalization: {self.config.normalization}")
 
     def create_head(
         self,
