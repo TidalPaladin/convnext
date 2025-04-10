@@ -174,9 +174,9 @@ class TestConvNext:
     def test_baseline(self, config, normalization):
         config = ConvNextConfig(
             in_channels=3,
-            depths=(2, 2, 2),
-            hidden_sizes=[64, 96, 128],
-            ffn_hidden_sizes=[256, 384, 512],
+            depths=(3, 3, 9, 3),
+            hidden_sizes=[64, 96, 128, 256],
+            ffn_hidden_sizes=[256, 384, 512, 1024],
             patch_size=(4, 4),
             kernel_size=(3, 3),
             activation="srelu",
@@ -186,8 +186,8 @@ class TestConvNext:
         )
         te_config = replace(config, backend="te")
 
-        x = torch.randn(1, 3, 224, 224, device="cuda")
-        model = ConvNext2d(config).to("cuda")
+        x = torch.randn(1, 3, 224, 224)
+        model = ConvNext2d(config)
         baseline = ConvNext2d(te_config).to("cuda")
 
         for name, param in model.named_parameters():
@@ -198,5 +198,5 @@ class TestConvNext:
 
         with torch.autocast(device_type="cuda", dtype=torch.float32, enabled=True):
             features = model(x)
-            features_baseline = baseline(x)
-        assert_close(features, features_baseline, atol=1e-3, rtol=0)
+            features_baseline = baseline(x.cuda())
+        assert_close(features, features_baseline, atol=1e-3, rtol=0, check_device=False)
