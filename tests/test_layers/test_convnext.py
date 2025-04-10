@@ -7,7 +7,7 @@ from torch.testing import assert_close
 from convnext.convnext import ConvNext2d, ConvNextConfig
 
 
-@pytest.fixture(params=["pytorch", "te"])
+@pytest.fixture(params=["pytorch", pytest.param("te", marks=pytest.mark.cuda)])
 def config(request):
     config = ConvNextConfig(
         in_channels=3,
@@ -169,6 +169,7 @@ class TestConvNext:
         assert out1.shape == (1, 72, 16, 16)
         assert out2.shape == (1, 48, 64, 64)
 
+    @pytest.mark.cuda
     @pytest.mark.parametrize("normalization", ["LayerNorm", "RMSNorm"])
     def test_baseline(self, config, normalization):
         config = ConvNextConfig(
@@ -179,7 +180,7 @@ class TestConvNext:
             patch_size=(4, 4),
             kernel_size=(3, 3),
             activation="srelu",
-            normalization="LayerNorm",
+            normalization=normalization,
             drop_path_rate=0.1,
             backend="pytorch",
         )
