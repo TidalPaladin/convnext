@@ -77,6 +77,7 @@ quality = [
 [tool.pytest.ini_options]
 markers = [
   "ci_skip",
+  "cuda",
 ]
 filterwarnings = []
 

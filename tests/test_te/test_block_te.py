@@ -20,7 +20,6 @@ class TestConvNextBlock2dTransformerEngine:
             hidden_size=32,
             ffn_hidden_size=64,
             normalization=normalization,
-            dropout=0.1,
             drop_path_rate=0.1,
         ).to("cuda")
         x = torch.randn(1, 32, 64, 64, device="cuda")
@@ -52,14 +51,12 @@ class TestConvNextBlock2dTransformerEngine:
             hidden_size=32,
             ffn_hidden_size=64,
             normalization=normalization,
-            dropout=0.1,
             drop_path_rate=0.1,
         ).to("cuda")
         block = ConvNextBlock2d(
             hidden_size=32,
             ffn_hidden_size=64,
             normalization=normalization,
-            dropout=0.1,
             drop_path_rate=0.1,
         ).to("cuda")
 

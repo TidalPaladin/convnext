@@ -13,7 +13,6 @@ class TestConvNextBlock2d:
             hidden_size=32,
             ffn_hidden_size=64,
             normalization=normalization,
-            dropout=0.1,
             drop_path_rate=0.1,
         )
         x = torch.randn(1, 32, 64, 64)
@@ -43,14 +42,8 @@ class TestConvNextBlock2d:
         block = ConvNextBlock2d(
             hidden_size=32,
             ffn_hidden_size=64,
-            dropout=0.1,
         )
         x = torch.randn(1, 32, 64, 64)
-        block.train()
-        y1 = block(x)
-        y2 = block(x)
-        assert not torch.allclose(y1, y2)
-
         block.eval()
         y3 = block(x)
         y4 = block(x)
