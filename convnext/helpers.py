@@ -1,5 +1,5 @@
 import os
-from typing import Callable, Final
+from typing import Any, Callable, Final
 
 import torch
 import torch.nn as nn
@@ -71,3 +71,20 @@ def get_activation_module(activation: str) -> nn.Module:
             return SRelu()
         case _:
             raise ValueError(f"Activation {activation} not supported")
+
+
+def try_import_te() -> Any:  # type: ignore[name-defined]
+    try:
+        import transformer_engine.pytorch as te  # type: ignore[reportMissingImports]
+
+        return te
+    except ImportError:
+        return None
+
+
+def check_te_installed(te: Any) -> Any:
+    if te is None:
+        raise ImportError(
+            "transformer_engine is not installed. "
+            "Please install it with `pip install --no-build-isolation transformer-engine[pytorch]`"
+        )

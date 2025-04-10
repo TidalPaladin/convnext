@@ -1,12 +1,18 @@
 from dataclasses import dataclass, field
-from typing import ClassVar, List, Literal, Sequence, Tuple, Type, cast
+from typing import TYPE_CHECKING, Any, ClassVar, Dict, List, Literal, Sequence, Tuple, Type, cast
 
 import torch.nn as nn
 from einops.layers.torch import Rearrange
 from torch import Tensor
 
 from .block import ConvNextBlock2d, LayerNorm2d, RMSNorm2d, grid_to_tokens, tokens_to_grid
-from .helpers import TRUNC_NORMAL_STD
+from .helpers import TRUNC_NORMAL_STD, check_te_installed, try_import_te
+
+
+if TYPE_CHECKING:
+    import transformer_engine.pytorch as te  # type: ignore[reportMissingImports]
+else:
+    te = try_import_te()
 
 
 @dataclass(frozen=True)
@@ -23,7 +29,6 @@ class ConvNextConfig:
     normalization: str = "LayerNorm"
     bias: bool = True
     activation: str = "srelu"
-    hidden_dropout: float = 0.0
     drop_path_rate: float = 0.0
     checkpoint: bool = False
 
@@ -34,20 +39,29 @@ class ConvNextConfig:
     backend: Literal["pytorch", "te"] = "pytorch"
 
     def instantiate(self) -> "ConvNext2d":
-        if self.backend == "pytorch":
-            return ConvNext2d(self)
-        elif self.backend == "te":
-            from .te.convnext import ConvNext2d as ConvNext2dTE
-
-            return cast(ConvNext2d, ConvNext2dTE(self))
-        else:
+        if self.backend not in ["pytorch", "te"]:
             raise ValueError(f"Invalid backend: {self.backend}")
+        return ConvNext2d(self)
+
+    @property
+    def device_type(self) -> str:
+        return "cuda" if self.backend == "te" else "cpu"
 
     @property
     def isotropic_output_dim(self) -> int:
         if self.up_depths:
             return list(reversed(self.hidden_sizes))[len(self.up_depths) - 1]
         return self.hidden_sizes[-1]
+
+    @property
+    def block_kwargs(self) -> Dict[str, Any]:
+        return dict(
+            kernel_size=tuple(self.kernel_size),
+            activation=self.activation,
+            normalization=self.normalization,
+            checkpoint=self.checkpoint,
+            drop_path_rate=self.drop_path_rate,
+        )
 
 
 class ConvNext2d(nn.Module):
@@ -71,16 +85,7 @@ class ConvNext2d(nn.Module):
             [
                 nn.ModuleList(
                     [
-                        ConvNextBlock2d(
-                            self.config.hidden_sizes[i],
-                            self.config.ffn_hidden_sizes[i],
-                            kernel_size=cast(Tuple[int, int], tuple(self.config.kernel_size)),
-                            activation=self.config.activation,
-                            normalization=self.config.normalization,
-                            checkpoint=self.config.checkpoint,
-                            dropout=self.config.hidden_dropout,
-                            drop_path_rate=self.config.drop_path_rate,
-                        )
+                        self.create_block(self.config.hidden_sizes[i], self.config.ffn_hidden_sizes[i])
                         for _ in range(self.config.depths[i])
                     ]
                 )
@@ -101,19 +106,7 @@ class ConvNext2d(nn.Module):
         self.up_stages = nn.ModuleList(
             [
                 nn.ModuleList(
-                    [
-                        ConvNextBlock2d(
-                            up_dims[i],
-                            up_dims_feedforward[i],
-                            kernel_size=cast(Tuple[int, int], tuple(self.config.kernel_size)),
-                            activation=self.config.activation,
-                            normalization=self.config.normalization,
-                            checkpoint=self.config.checkpoint,
-                            dropout=self.config.hidden_dropout,
-                            drop_path_rate=self.config.drop_path_rate,
-                        )
-                        for _ in range(self.config.up_depths[i])
-                    ]
+                    [self.create_block(up_dims[i], up_dims_feedforward[i]) for _ in range(self.config.up_depths[i])]
                 )
                 for i in range(len(self.config.up_depths) - 1)
             ]
@@ -127,23 +120,59 @@ class ConvNext2d(nn.Module):
             ]
         )
 
-    def create_norm(self, dim: int) -> nn.Module:
-        match self.config.normalization:
-            case "LayerNorm":
-                return nn.LayerNorm(dim)
-            case "RMSNorm":
-                return nn.RMSNorm(dim)
+    @property
+    def device_type(self) -> str:
+        return self.config.device_type
+
+    def create_block(self, hidden_size: int, ffn_hidden_size: int) -> nn.Module:
+        match self.config.backend:
+            case "pytorch":
+                return ConvNextBlock2d(hidden_size, ffn_hidden_size, **self.config.block_kwargs)
+            case "te":
+                check_te_installed(te)
+                from .te.block import ConvNextBlock2d as ConvNextBlock2dTE
+
+                return ConvNextBlock2dTE(hidden_size, ffn_hidden_size, **self.config.block_kwargs)
             case _:
-                raise ValueError(f"Invalid normalization: {self.config.normalization}")
+                raise ValueError(f"Invalid backend: {self.config.backend}")
+
+    def create_norm(self, dim: int) -> nn.Module:
+        match (self.config.normalization, self.config.backend):
+            case ("LayerNorm", "pytorch"):
+                return nn.LayerNorm(dim)
+            case ("LayerNorm", "te"):
+                check_te_installed(te)
+                return te.LayerNorm(dim)
+            case ("RMSNorm", "pytorch"):
+                return nn.RMSNorm(dim)
+            case ("RMSNorm", "te"):
+                check_te_installed(te)
+                return te.RMSNorm(dim)
+            case _:
+                raise ValueError(
+                    f"Invalid normalization: {self.config.normalization} for backend: {self.config.backend}"
+                )
 
     def create_norm_2d(self, dim: int) -> nn.Module:
-        match self.config.normalization:
-            case "LayerNorm":
+        match (self.config.normalization, self.config.backend):
+            case ("LayerNorm", "pytorch"):
                 return LayerNorm2d(dim)
-            case "RMSNorm":
+            case ("LayerNorm", "te"):
+                check_te_installed(te)
+                from .te.block import RMSNorm2d as RMSNorm2dTE
+
+                return RMSNorm2dTE(dim)
+            case ("RMSNorm", "pytorch"):
                 return RMSNorm2d(dim)
+            case ("RMSNorm", "te"):
+                check_te_installed(te)
+                from .te.block import RMSNorm2d as RMSNorm2dTE
+
+                return RMSNorm2dTE(dim)
             case _:
-                raise ValueError(f"Invalid normalization: {self.config.normalization}")
+                raise ValueError(
+                    f"Invalid normalization: {self.config.normalization} for backend: {self.config.backend}"
+                )
 
     def create_head(
         self,
@@ -174,8 +203,14 @@ class ConvNext2d(nn.Module):
         # Normalization + Linear
         if pool_type is not None:
             layer.add_module("norm", self.create_norm(self.config.isotropic_output_dim))
-            linear = nn.Linear(self.config.isotropic_output_dim, out_dim)
-            nn.init.trunc_normal_(linear.weight, std=TRUNC_NORMAL_STD)
+            if self.config.backend == "pytorch":
+                linear = nn.Linear(self.config.isotropic_output_dim, out_dim)
+                nn.init.trunc_normal_(linear.weight, std=TRUNC_NORMAL_STD)
+            elif self.config.backend == "te":
+                check_te_installed(te)
+                linear = te.Linear(self.config.isotropic_output_dim, out_dim)
+            else:
+                raise ValueError(f"Invalid backend: {self.config.backend}")
             layer.add_module("linear", linear)
         else:
             layer.add_module("norm", self.create_norm_2d(self.config.isotropic_output_dim))

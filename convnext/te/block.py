@@ -1,17 +1,24 @@
-from typing import Sequence, Tuple, cast
+from typing import TYPE_CHECKING, Sequence, Tuple, cast
 
 import torch.nn as nn
 import torch.nn.functional as F
-import transformer_engine.pytorch as te  # type: ignore[reportMissingImports]
 from torch import Tensor
 
 from ..block import grid_to_tokens, tokens_to_grid
 from ..drop_path import drop_path
+from ..helpers import check_te_installed, try_import_te
+
+
+if TYPE_CHECKING:
+    import transformer_engine.pytorch as te  # type: ignore[reportMissingImports]
+else:
+    te = try_import_te()
 
 
 class LayerNorm2d(nn.Module):
     def __init__(self, num_features: int, eps: float = 1e-5):
         super().__init__()
+        check_te_installed(te)
         self.norm = te.LayerNorm(num_features, eps=eps)
 
     def forward(self, x: Tensor) -> Tensor:
@@ -23,6 +30,7 @@ class LayerNorm2d(nn.Module):
 class RMSNorm2d(nn.Module):
     def __init__(self, num_features: int, eps: float = 1e-5):
         super().__init__()
+        check_te_installed(te)
         self.norm = te.RMSNorm(num_features, eps=eps)
 
     def forward(self, x: Tensor) -> Tensor:
@@ -41,12 +49,12 @@ class ConvNextBlock2d(nn.Module):
         activation: str = "srelu",
         normalization: str = "LayerNorm",
         stride: Sequence[int] = (1, 1),
-        dropout: float = 0.0,
         bias: bool = True,
         drop_path_rate: float = 0.0,
         checkpoint: bool = False,
     ):
         super().__init__()
+        check_te_installed(te)
         self.drop_path_rate = drop_path_rate
         self.checkpoint = checkpoint
 
@@ -67,9 +75,9 @@ class ConvNextBlock2d(nn.Module):
             ffn_hidden_size,
             activation=activation,
             normalization=normalization,
+            bias=bias,
         )
 
-        self.dropout = dropout
         self.reset_parameters()
 
     def reset_parameters(self) -> None:

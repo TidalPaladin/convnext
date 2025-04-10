@@ -66,8 +66,6 @@ def forward_layer_norm_mlp(
     fc2_weight: Tensor,
     fc2_bias: Tensor | None,
     activation: Callable[[Tensor], Tensor],
-    dropout: float,
-    training: bool,
 ) -> Tensor:
     # Normalization
     if normalization == "LayerNorm":
@@ -80,7 +78,6 @@ def forward_layer_norm_mlp(
     # FF1
     y = F.linear(y, fc1_weight, fc1_bias)
     y = activation(y)
-    y = F.dropout(y, dropout, training=training)
 
     # FF2
     y = F.linear(y, fc2_weight, fc2_bias)
@@ -89,6 +86,8 @@ def forward_layer_norm_mlp(
 
 
 class LayerNormMLP(nn.Module):
+    r"""MLP with pre-normalization, matching TransformerEngine's LayerNormMLP."""
+
     def __init__(
         self,
         hidden_size: int,
@@ -96,7 +95,6 @@ class LayerNormMLP(nn.Module):
         activation: str,
         normalization: str,
         bias: bool = True,
-        dropout: float = 0.0,
         checkpoint: bool = False,
     ):
         super().__init__()
@@ -116,7 +114,6 @@ class LayerNormMLP(nn.Module):
         self.fc1_bias = nn.Parameter(torch.zeros(ffn_hidden_size)) if bias else None
         self.fc2_bias = nn.Parameter(torch.zeros(hidden_size)) if bias else None
         self.act = get_activation(activation)
-        self.dropout = dropout
 
     def reset_parameters(self) -> None:
         nn.init.ones_(self.layer_norm_weight)
@@ -142,8 +139,6 @@ class LayerNormMLP(nn.Module):
                 self.fc2_weight,
                 self.fc2_bias,
                 self.act,
-                self.dropout,
-                self.training,
                 use_reentrant=False,
             )
         else:
@@ -157,8 +152,6 @@ class LayerNormMLP(nn.Module):
                 self.fc2_weight,
                 self.fc2_bias,
                 self.act,
-                self.dropout,
-                self.training,
             )
         assert isinstance(y, Tensor)
         assert y.shape == x.shape
@@ -203,7 +196,6 @@ def convnext_forward_2d(
     fc2_weight: Tensor,
     fc2_bias: Tensor | None,
     activation: Callable[[Tensor], Tensor],
-    dropout: float,
     drop_path_rate: float,
     training: bool,
 ) -> Tensor:
@@ -225,7 +217,6 @@ def convnext_forward_2d(
     # FF1
     y = F.linear(y, fc1_weight, fc1_bias)
     y = activation(y)
-    y = F.dropout(y, dropout, training=training)
 
     # FF2, convert back to 2D grid
     y = F.linear(y, fc2_weight, fc2_bias)
@@ -244,7 +235,6 @@ class ConvNextBlock2d(nn.Module):
         activation: str = "srelu",
         normalization: str = "LayerNorm",
         stride: Sequence[int] = (1, 1),
-        dropout: float = 0.0,
         bias: bool = True,
         drop_path_rate: float = 0.0,
         checkpoint: bool = False,
@@ -270,7 +260,6 @@ class ConvNextBlock2d(nn.Module):
             activation,
             normalization,
             bias,
-            dropout,
             checkpoint,
         )
         self.reset_parameters()
