@@ -64,6 +64,7 @@ class TestConvNextBlock2d:
         y4 = block(x)
         assert torch.allclose(y3, y4)
 
+    @pytest.mark.cuda
     @pytest.mark.parametrize("normalization", ["LayerNorm", "RMSNorm"])
     def test_baseline(self, normalization):
         baseline = ConvNextBlock2d(
