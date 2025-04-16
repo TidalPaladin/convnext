@@ -26,6 +26,18 @@ def config(request):
 
 class TestConvNext:
 
+    def test_config_from_yaml_str(self, config):
+        config_str = config.to_yaml()
+        config_from_str = ConvNextConfig.from_yaml(config_str)
+        assert config == config_from_str
+
+    def test_config_from_yaml_path(self, config, tmp_path):
+        path = tmp_path / "config.yaml"
+        with open(path, "w") as f:
+            f.write(config.to_yaml())
+        config_from_path = ConvNextConfig.from_yaml(path)
+        assert config == config_from_path
+
     @pytest.mark.parametrize(
         "backend",
         [
