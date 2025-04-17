@@ -263,7 +263,9 @@ class ConvNextBlock2d(nn.Module):
         if self.checkpoint and self.training:
             y = checkpoint(self._forward_conv_permute, x, use_reentrant=False)
             y = checkpoint(self.mlp, y, use_reentrant=False)
-            return checkpoint(self._forward_unpermute_drop_path, x, y, use_reentrant=False)
+            y = checkpoint(self._forward_unpermute_drop_path, x, y, use_reentrant=False)
+            assert isinstance(y, Tensor)
+            return y
         else:
             y = self._forward_conv_permute(x)
             y = self.mlp(y)
