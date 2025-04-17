@@ -102,11 +102,9 @@ class LayerNormMLP(nn.Module):
         activation: str,
         normalization: str,
         bias: bool = True,
-        checkpoint: bool = False,
         eps: float = 1e-5,
     ):
         super().__init__()
-        self.checkpoint = checkpoint
         self.eps = eps
 
         # Normalization
@@ -136,37 +134,18 @@ class LayerNormMLP(nn.Module):
             nn.init.zeros_(self.fc2_bias)
 
     def forward(self, x: Tensor) -> Tensor:
-        if self.training and self.checkpoint:
-            y = checkpoint(
-                forward_layer_norm_mlp,
-                x,
-                self.normalization,
-                self.layer_norm_weight,
-                self.layer_norm_bias,
-                self.fc1_weight,
-                self.fc1_bias,
-                self.fc2_weight,
-                self.fc2_bias,
-                self.act,
-                self.eps,
-                use_reentrant=False,
-            )
-        else:
-            y = forward_layer_norm_mlp(
-                x,
-                self.normalization,
-                self.layer_norm_weight,
-                self.layer_norm_bias,
-                self.fc1_weight,
-                self.fc1_bias,
-                self.fc2_weight,
-                self.fc2_bias,
-                self.act,
-                self.eps,
-            )
-        assert isinstance(y, Tensor)
-        assert y.shape == x.shape
-        return y
+        return forward_layer_norm_mlp(
+            x,
+            self.normalization,
+            self.layer_norm_weight,
+            self.layer_norm_bias,
+            self.fc1_weight,
+            self.fc1_bias,
+            self.fc2_weight,
+            self.fc2_bias,
+            self.act,
+            self.eps,
+        )
 
 
 class LayerNorm2d(nn.Module):
@@ -244,7 +223,6 @@ class ConvNextBlock2d(nn.Module):
                     activation,
                     normalization,
                     bias,
-                    checkpoint,
                     eps,
                 )
             case "te":
@@ -266,7 +244,7 @@ class ConvNextBlock2d(nn.Module):
         self.conv_dw.reset_parameters()
         self.mlp.reset_parameters()
 
-    def forward(self, x: Tensor) -> Tensor:
+    def _forward_conv_permute(self, x: Tensor) -> Tensor:
         y = F.conv2d(
             x,
             self.conv_dw.weight,
@@ -275,7 +253,20 @@ class ConvNextBlock2d(nn.Module):
             padding=self.conv_dw.padding,
             groups=self.conv_dw.groups,
         )
-        y = grid_to_tokens(y)
-        y = self.mlp(y)
+        return grid_to_tokens(y)
+
+    def _forward_unpermute_drop_path(self, x: Tensor, y: Tensor) -> Tensor:
         y = tokens_to_grid(y, x.shape[2:])
         return x + drop_path(y, self.drop_path_rate, self.training)
+
+    def forward(self, x: Tensor) -> Tensor:
+        if self.checkpoint and self.training:
+            y = checkpoint(self._forward_conv_permute, x, use_reentrant=False)
+            y = checkpoint(self.mlp, y, use_reentrant=False)
+            y = checkpoint(self._forward_unpermute_drop_path, x, y, use_reentrant=False)
+            assert isinstance(y, Tensor)
+            return y
+        else:
+            y = self._forward_conv_permute(x)
+            y = self.mlp(y)
+            return self._forward_unpermute_drop_path(x, y)
