@@ -17,6 +17,22 @@ else:
     te = try_import_te()
 
 
+def convnext_config_constructor(loader, node):
+    values = loader.construct_mapping(node, deep=True)
+    return ConvNextConfig(**values)
+
+
+def register_constructors():
+    tags = [
+        "tag:yaml.org,2002:python/object:convnext.convnext.ConvNextConfig",
+        "tag:yaml.org,2002:python/object:convnext.ConvNextConfig",
+    ]
+    loaders = [yaml.SafeLoader, yaml.FullLoader, yaml.UnsafeLoader]
+    for tag in tags:
+        for loader in loaders:
+            loader.add_constructor(tag, convnext_config_constructor)
+
+
 @dataclass(frozen=True)
 class ConvNextConfig:
     # Inputs
