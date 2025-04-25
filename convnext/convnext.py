@@ -7,7 +7,7 @@ import yaml
 from einops.layers.torch import Rearrange
 from torch import Tensor
 
-from .block import ConvNextBlock2d, LayerNorm2d, RMSNorm2d, grid_to_tokens, tokens_to_grid
+from .block import ConvNextBlock2d, LayerNorm2d, LayerNormMLP, RMSNorm2d, grid_to_tokens, tokens_to_grid
 from .helpers import TRUNC_NORMAL_STD, check_te_installed, try_import_te
 
 
@@ -70,6 +70,12 @@ class ConvNextConfig:
         if self.up_depths:
             return list(reversed(self.hidden_sizes))[len(self.up_depths) - 1]
         return self.hidden_sizes[-1]
+
+    @property
+    def isotropic_ffn_hidden_size(self) -> int:
+        if self.up_depths:
+            return list(reversed(self.ffn_hidden_sizes))[len(self.up_depths) - 1]
+        return self.ffn_hidden_sizes[-1]
 
     @property
     def block_kwargs(self) -> Dict[str, Any]:
@@ -195,12 +201,14 @@ class ConvNext2d(nn.Module):
         self,
         out_dim: int,
         pool_type: str | None = None,
+        mlp: bool = False,
     ) -> nn.Module:
         r"""Creates a head for the model.
 
         Args:
             out_dim: Dimension of the output.
             pool_type: Type of pooling to apply, or ``None`` to skip pooling.
+            mlp: Whether to use a MLP head.
         """
         layer = nn.Sequential()
 
@@ -213,12 +221,13 @@ class ConvNext2d(nn.Module):
                 layer.add_module("pool", nn.AdaptiveMaxPool2d((1, 1)))
                 layer.add_module("reshape", Rearrange("b c 1 1 -> b c"))
             case None:
-                pass
+                layer.add_module("reshape", Rearrange("b c h w -> b h w c"))
             case _:
                 raise ValueError(f"Invalid pool type: {pool_type}")
 
-        # Normalization + Linear
-        if pool_type is not None:
+        if mlp:
+            layer.add_module("layernorm_mlp", self.create_mlp(out_dim))
+        else:
             layer.add_module("norm", self.create_norm(self.config.isotropic_output_dim))
             if self.config.backend == "pytorch":
                 linear = nn.Linear(self.config.isotropic_output_dim, out_dim)
@@ -229,11 +238,49 @@ class ConvNext2d(nn.Module):
             else:
                 raise ValueError(f"Invalid backend: {self.config.backend}")
             layer.add_module("linear", linear)
-        else:
-            layer.add_module("norm", self.create_norm_2d(self.config.isotropic_output_dim))
-            conv = nn.Conv2d(self.config.isotropic_output_dim, out_dim, kernel_size=1)
-            layer.add_module("conv", conv)
 
+        if pool_type is None:
+            layer.add_module("unreshape", Rearrange("b h w c -> b c h w"))
+
+        return layer
+
+    def create_mlp(self, out_dim: int) -> nn.Module:
+        r"""Creates a MLP with a final output projection to `out_dim`.
+
+        Args:
+            out_dim: Dimension of the output.
+
+        """
+        layer = nn.Sequential()
+        match self.config.backend:
+            case "pytorch":
+                layer.add_module(
+                    "mlp",
+                    LayerNormMLP(
+                        self.config.isotropic_output_dim,
+                        self.config.isotropic_ffn_hidden_size,
+                        bias=self.config.bias,
+                        normalization=self.config.normalization,
+                        activation=self.config.activation,
+                    ),
+                )
+                layer.add_module("output", nn.Linear(self.config.isotropic_output_dim, out_dim))
+            case "te":
+                check_te_installed(te)
+                layer.add_module(
+                    "mlp",
+                    te.LayerNormMLP(
+                        self.config.isotropic_output_dim,
+                        self.config.isotropic_ffn_hidden_size,
+                        out_dim,
+                        bias=self.config.bias,
+                        normalization=self.config.normalization,
+                        activation=self.config.activation,
+                    ),
+                )
+                layer.add_module("output", te.Linear(self.config.isotropic_output_dim, out_dim))
+            case _:
+                raise ValueError(f"Invalid backend: {self.config.backend}")
         return layer
 
     def forward(self, x: Tensor) -> Tensor:
